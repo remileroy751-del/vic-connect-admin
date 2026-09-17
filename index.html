@@ -3,12 +3,6 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>VIC-CONNECT — Super Admin</title>
-<script>
-window.addEventListener('error', function(e){
-  var el=document.getElementById('loginMsg');
-  if(el && !el.textContent) { el.className='notice danger'; el.textContent='Erreur de chargement : '+(e.message||'JavaScript'); }
-});
-</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root{--g:#0b4a38;--g2:#12654c;--lime:#cbdc52;--soft:#eef5df;--white:#fff;--bg:#f5f7f4;--text:#17201c;--muted:#68746f;--line:#dfe6e1;--orange:#e58a22;--red:#d84444;--shadow:0 10px 35px rgba(11,74,56,.08)}
@@ -83,7 +77,7 @@ window.addEventListener('error', function(e){
 <div id="modal" class="modal hidden"><div class="modal-card"><button class="close" onclick="closeModal()">Fermer</button><div id="modalContent"></div></div></div>
 <script>
 const CONFIG={url:'https://dcxfshorvdaypqyugeil.supabase.co',key:'sb_publishable_YsEsTvgdcnLBFzfxsOm0eg_Nmvt5lYY'};
-if(!window.supabase){throw new Error('La bibliothèque Supabase ne s’est pas chargée. Vérifiez votre connexion Internet puis rechargez la page.')} const sb=window.supabase.createClient(CONFIG.url,CONFIG.key);let classes=[],subjects=[],parents=[],teachers=[],students=[],assignments=[],notes=[],news=[],receipts=[],conversations=[],messages=[];const $=id=>document.getElementById(id);
+const sb=supabase.createClient(CONFIG.url,CONFIG.key);let classes=[],subjects=[],parents=[],teachers=[],students=[],assignments=[],notes=[],news=[],receipts=[],conversations=[],messages=[];const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 function notice(id,text,good=true){const e=$(id);if(!e)return;e.className='notice '+(good?'':'danger');e.textContent=text}
 function fill(id,items,placeholder=''){const e=$(id);if(!e)return;e.innerHTML=(placeholder?`<option value="">${esc(placeholder)}</option>`:'')+items.map(x=>`<option value="${esc(x[0])}">${esc(x[1])}</option>`).join('')}
@@ -124,7 +118,7 @@ async function bootstrap(){
     notice('loginMsg','Erreur inattendue : '+(e?.message||e),false);
   }
 }
-async function start(){const {data:{user}}=await sb.auth.getUser();if(!user)return;await ensureParentLinks();$('login').classList.add('hidden');$('app').classList.remove('hidden');$('userEmail').textContent=user.email||'Direction';if($('adminInfo'))$('adminInfo').textContent='Compte connecté : '+(user.email||'');document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>show(b.dataset.sec));await loadAll()}
+async function start(){const {data:{user}}=await sb.auth.getUser();if(!user)return;await ensureParentLinks();$('login').classList.add('hidden');$('app').classList.remove('hidden');$('userEmail').textContent=user.email||'Direction';$('adminInfo').textContent='Compte connecté : '+(user.email||'');document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>show(b.dataset.sec));await loadAll()}
 async function logout(){await sb.auth.signOut();location.reload()}
 function show(id){document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));$(id).classList.add('active');const b=document.querySelector(`[data-sec="${id}"]`);$('pageTitle').textContent=b?b.textContent.replace(/^\S+\s*/,''):id;if(id==='messages')loadMessages();if(id==='receipts')loadReceipts()}
 async function loadAll(){
@@ -172,8 +166,8 @@ function changeNewsTarget(){const t=$('newsTarget').value;const f=$('newsTargetF
 async function publishNews(){const t=$('newsTarget').value,v=t==='all'?{}:{[t==='class'?'p_class_id':t==='student'?'p_student_id':'p_parent_id']:$('newsTargetSelect').value};const r=await sb.rpc('admin_create_announcement',{p_title:$('newsTitle').value.trim(),p_body:$('newsBodyText').value.trim(),p_importance:$('newsImportance').value,p_target_type:t,...v});if(r.error)return notice('newsMsg',r.error.message,false);notice('newsMsg','Communiqué publié.');$('newsTitle').value='';$('newsBodyText').value='';await loadAll()}
 async function loadReceipts(){const r=await sb.from('announcement_receipts').select('id,announcement_id,parent_id,student_id,acknowledged_at,announcements(title),parents(full_name),students(full_name)').order('acknowledged_at',{ascending:false}).limit(1000);if(!r.error){receipts=r.data||[];renderReceipts()}}
 async function loadMessages(){const r=await sb.from('conversations').select('id,parent_id,teacher_id,student_id,created_at,parents(full_name),teachers(full_name),students(full_name),messages(id,sender_role,body,created_at)').order('created_at',{ascending:false});if(r.error){$('messagesBody').innerHTML=`<tr><td colspan="6" class="empty">${esc(r.error.message)}</td></tr>`;return}conversations=r.data||[];$('messagesBody').innerHTML=conversations.map(c=>{const ms=(c.messages||[]).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));const last=ms[ms.length-1];return `<tr><td>${esc(c.students?.full_name||'')}</td><td>${esc(c.parents?.full_name||'')}</td><td>${esc(c.teachers?.full_name||'')}</td><td>${ms.length}</td><td>${esc(last?.body||'')}</td><td>${last?new Date(last.created_at).toLocaleString('fr-FR'):new Date(c.created_at).toLocaleString('fr-FR')}</td></tr>`}).join('')||'<tr><td colspan="6" class="empty">Aucune conversation.</td></tr>'}
-function viewStudent(id){const s=students.find(x=>x.id===id),ps=studentsParents(id);openModal(`<h2>${esc(s?.full_name)}</h2><p class="muted">Classe : ${esc(s?.classes?.name||'')}</p><h3>Parent(s)</h3>${ps.map(p=>`<p><b>${esc(p.full_name)}</b><br>${esc(p.phone||'')}</p>`).join('')||'<p class="muted">Aucun parent lié.</p>' )}
-function viewParent(id){const p=parents.find(x=>x.id===id),kids=(window.parentLinks||[]).filter(x=>x.parent_id===id).map(x=>students.find(s=>s.id===x.student_id)).filter(Boolean);openModal(`<h2>${esc(p?.full_name)}</h2><p>${esc(p?.phone||'')}</p><h3>Enfant(s)</h3>${kids.map(k=>`<p>${esc(k.full_name)} — ${esc(k.classes?.name||'')}</p>`).join('')||'<p class="muted">Aucun enfant lié.</p>' )}
+function viewStudent(id){const s=students.find(x=>x.id===id),ps=studentsParents(id);openModal(`<h2>${esc(s?.full_name)}</h2><p class="muted">Classe : ${esc(s?.classes?.name||'')}</p><h3>Parent(s)</h3>${ps.map(p=>`<p><b>${esc(p.full_name)}</b><br>${esc(p.phone||'')}</p>`).join('')||'<p class="muted">Aucun parent lié.</p>'}`);}
+function viewParent(id){const p=parents.find(x=>x.id===id),kids=(window.parentLinks||[]).filter(x=>x.parent_id===id).map(x=>students.find(s=>s.id===x.student_id)).filter(Boolean);openModal(`<h2>${esc(p?.full_name)}</h2><p>${esc(p?.phone||'')}</p><h3>Enfant(s)</h3>${kids.map(k=>`<p>${esc(k.full_name)} — ${esc(k.classes?.name||'')}</p>`).join('')||'<p class="muted">Aucun enfant lié.</p>'}`);}
 function openModal(html){$('modalContent').innerHTML=html;$('modal').classList.remove('hidden')}function closeModal(){$('modal').classList.add('hidden')}
 (async()=>{await ensureParentLinks();const s=await sb.auth.getSession();if(s.data.session)await start();})();
 </script>
