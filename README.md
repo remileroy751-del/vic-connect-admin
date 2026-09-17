@@ -32,14 +32,3 @@ La base comprend notamment Français, Anglais, Mathématiques, Sciences Physique
 ## Important
 
 Le fichier `supabase/schema-corrige.sql` est la version complète du schéma SQL corrigé déjà exécutée dans Supabase. Il est conservé dans le projet comme référence.
-
-## Correctif Super Admin - 16/09/2026
-
-Le fichier `index.html` à la racine et `admin/index.html` contiennent la correction JavaScript du Super Admin.
-Le script `supabase/fix-super-admin.sql` est un correctif non destructif destiné à Supabase.
-
-### GitHub Pages
-Publier le dépôt avec GitHub Pages sur la branche `main`, dossier `/(root)`. L'interface Super Admin est alors accessible depuis l'URL GitHub Pages du dépôt.
-
-### Supabase
-Exécuter `supabase/fix-super-admin.sql` dans SQL Editor après le schéma principal. Ce script ne supprime pas les tables et ne supprime pas les données.
