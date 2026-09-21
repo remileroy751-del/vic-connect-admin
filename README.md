@@ -1,34 +1,38 @@
-# VIC-CONNECT
+# VIC-CONNECT — version mise à jour
 
-Application Android du **Lycée technique et moderne VIC-INTELLIGENTSIA**.
+Projet prêt pour GitHub :
+- application Android Kotlin/Jetpack Compose ;
+- interface Super Admin statique dans `index.html` et `admin/index.html` ;
+- workflow GitHub Actions dans `.github/workflows/android.yml` ;
+- migrations Supabase dans `supabase/`.
 
-## Connexion Supabase
+## Mise à jour Supabase
 
-Le projet est déjà configuré avec :
+Après avoir remplacé les fichiers du dépôt GitHub, ouvrir Supabase > SQL Editor et exécuter **le contenu** de :
 
-- URL : `https://dcxfshorvdaypqyugeil.supabase.co`
-- Clé : clé Publishable Supabase fournie pour l'application.
+`supabase/migration-v3.sql`
 
-Cette clé est destinée à être utilisée côté application cliente. **Ne mettez jamais une clé `service_role` ou une clé secrète dans l'application ou GitHub.**
+Ne pas taper le nom du fichier dans SQL Editor.
 
-## Compilation GitHub automatique
+Cette migration ajoute notamment :
+- registre administratif des nouveaux codes parents/enseignants ;
+- historique des renouvellements de codes ;
+- RPC sécurisée `admin_access_codes` pour la Direction ;
+- modification des affectations enseignant/classe/matière via `admin_update_teacher_assignment`.
 
-Le fichier `.github/workflows/android.yml` lance automatiquement la compilation dès qu'un commit est envoyé sur la branche `main`.
+Les codes créés avant cette migration ne peuvent pas être retrouvés depuis leur hash. Ils apparaîtront dans le registre lors d'une nouvelle création ou d'un renouvellement de code.
 
-Après l'ajout du projet sur GitHub :
+## GitHub Pages
 
-1. Créez un dépôt GitHub vide.
-2. Importez/décompressez tout le contenu de ce ZIP dans le dépôt.
-3. Faites le premier commit sur `main`.
-4. GitHub lance automatiquement **Actions → Build VIC-CONNECT Android**.
-5. À la fin, l'APK est disponible dans l'artefact **VIC-CONNECT-debug-apk**.
+La configuration Pages déjà activée peut rester telle quelle (`main` / `/(root)`). Les changements poussés sur `main` sont publiés automatiquement. L'interface Super Admin est disponible à la racine et dans `/admin/`.
 
-Aucun secret GitHub n'est nécessaire pour cette première version car la clé Publishable n'est pas une clé serveur secrète et l'URL/la clé sont déjà configurées dans le projet.
+## Android
 
-## Matières du collège
+Le workflow compile avec Java 17, Gradle 8.9, Android SDK 35 et publie l'APK Debug comme artefact GitHub Actions.
 
-La base comprend notamment Français, Anglais, Mathématiques, Sciences Physiques, SVT, Histoire-Géographie, Informatique, EPS, Technologie et Éducation Civique. Le ministère du Togo décrit le collège comme le Cycle secondaire 1 (6e à 3e) et ses ressources pédagogiques récentes couvrent notamment mathématiques, français, physique-chimie, technologie et SVT. Les programmes rénovés mentionnent aussi les TIC et les valeurs citoyennes.
+## Migration Supabase V4
+Après déploiement de cette version, exécuter **le contenu complet de `supabase/migration-v4.sql`** dans Supabase > SQL Editor. Cette migration configure la protection de création des classes par mot de passe Direction et conserve uniquement le hash du mot de passe en base.
 
-## Important
-
-Le fichier `supabase/schema-corrige.sql` est la version complète du schéma SQL corrigé déjà exécutée dans Supabase. Il est conservé dans le projet comme référence.
+## Mise à jour V5 — Statistiques et messagerie
+Le fichier `supabase/migration-v5-messagerie-statistiques.sql` ajoute les statistiques enseignant, la boîte de réception enseignant et le quota de messagerie de 5 messages par compte et par jour civil GMT.
+Exécuter cette migration dans Supabase avant de tester les nouvelles fonctions.
