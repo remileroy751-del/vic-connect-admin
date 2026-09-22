@@ -385,7 +385,7 @@ private fun ParentChildScreen(api: VicApi, code: String, child: Child, back: () 
         Row(verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = { if (page == "menu") back() else page = "menu" }) { Icon(Icons.Default.ArrowBack, "Retour") }; Column { Text(child.name, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = DarkGreen); Text(child.className, color = Color.Gray) } }
         Spacer(Modifier.height(20.dp))
         when (page) {
-            "menu" -> { ParentAction("Voir les notes", Icons.Default.School) { page = "notes" }; ParentAction("Voir les communiqués", Icons.Default.Notifications) { page = "news" }; ParentAction("Voir les enseignants de mon enfant", Icons.Default.Groups) { page = "chat" } }
+            "menu" -> { ParentAction("Voir les notes", Icons.Default.School) { page = "notes" }; ParentAction("Message de la Direction", Icons.Default.Campaign) { page = "news" }; ParentAction("Voir les enseignants de mon enfant", Icons.Default.Groups) { page = "chat" } }
             "notes" -> NotesScreen(api, code, child) { page = "menu" }
             "news" -> NewsScreen(api, code, child) { page = "menu" }
             "chat" -> ChatScreen(api, code, child) { page = "menu" }
@@ -430,7 +430,7 @@ private fun NewsScreen(api: VicApi, code: String, child: Child, back: () -> Unit
     var items by remember { mutableStateOf<List<Announcement>>(emptyList()) }; val scope = rememberCoroutineScope(); BackHandler { back() }
     fun refresh() { scope.launch { runCatching { items = withContext(Dispatchers.IO) { api.announcements(code, child.id) } } } }
     LaunchedEffect(Unit) { refresh() }
-    Column(Modifier.fillMaxSize()) { Text("Communiqués", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = DarkGreen); Spacer(Modifier.height(12.dp)); LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) { items(items) { n -> val c = when (n.importance) { "rouge" -> Red; "orange" -> Orange; else -> YellowGreen }; Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Column(Modifier.padding(16.dp)) { Text(n.title, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp); Text(n.createdAt, color = Color.Gray, fontSize = 11.sp); Spacer(Modifier.height(6.dp)); Text(n.body); Spacer(Modifier.height(10.dp)); Button(onClick = { if (!n.acknowledged) scope.launch { withContext(Dispatchers.IO) { api.acknowledge(code, n.id, child.id) }; refresh() } }, enabled = !n.acknowledged, colors = ButtonDefaults.buttonColors(containerColor = c)) { Text(if (n.acknowledged) "Bien reçu ✓" else "Bien reçu", color = if (n.importance == "vert") Color.Black else Color.White) } } } } } }
+    Column(Modifier.fillMaxSize()) { Text("Message de la Direction", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = DarkGreen); Spacer(Modifier.height(12.dp)); LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) { items(items) { n -> val c = when (n.importance) { "urgent", "rouge" -> Red; else -> YellowGreen }; Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Column(Modifier.padding(16.dp)) { Text(n.title, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp); Text(n.createdAt, color = Color.Gray, fontSize = 11.sp); Spacer(Modifier.height(6.dp)); Text(n.body); Spacer(Modifier.height(10.dp)); Button(onClick = { if (!n.acknowledged) scope.launch { withContext(Dispatchers.IO) { api.acknowledge(code, n.id, child.id) }; refresh() } }, enabled = !n.acknowledged, colors = ButtonDefaults.buttonColors(containerColor = c)) { Text(if (n.acknowledged) "Bien reçu ✓" else "Bien reçu", color = if (n.importance == "pas_urgent" || n.importance == "vert" || n.importance == "orange") Color.Black else Color.White) } } } } } }
 }
 
 @Composable
@@ -483,14 +483,14 @@ private fun TeacherDirectionMessagesScreen(api: VicApi, code: String, back: () -
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = back) { Icon(Icons.Default.ArrowBack, "Retour") }
-            Text("Messages de la Direction", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = DarkGreen)
+            Text("Message de la Direction", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = DarkGreen)
         }
         Spacer(Modifier.height(8.dp))
-        Text("Messages envoyés par la Direction à tous les enseignants.", color = Color.Gray, fontSize = 12.sp)
+        Text("Messages envoyés par la Direction à cet enseignant.", color = Color.Gray, fontSize = 12.sp)
         Spacer(Modifier.height(12.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(items) { n ->
-                val c = when (n.importance) { "rouge" -> Red; "orange" -> Orange; else -> YellowGreen }
+                val c = when (n.importance) { "urgent", "rouge" -> Red; else -> YellowGreen }
                 Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                     Column(Modifier.padding(16.dp)) {
                         Text(n.title, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
@@ -559,7 +559,7 @@ private fun TeacherHome(api: VicApi, code: String, teacherName: String, logout: 
                     step = "messages"
                     scope.launch { conversations = withContext(Dispatchers.IO) { api.teacherConversations(code) } }
                 }
-                ParentAction("Messages de la Direction", Icons.Default.Campaign) { step = "direction" }
+                ParentAction("Message de la Direction", Icons.Default.Campaign) { step = "direction" }
             }
             "assignments" -> {
                 TextButton(onClick = { step = "home" }) { Text("← Tableau de bord") }

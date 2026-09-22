@@ -125,18 +125,23 @@ create table public.announcements (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   body text not null,
-  importance text not null check (importance in ('vert','orange','rouge')),
-  target_type text not null check (target_type in ('all','class','student','parent')),
+  importance text not null check (importance in ('urgent','pas_urgent')),
+  target_type text not null check (target_type in ('all','class','student','parent','all_parents','class_parents','all_teachers','teacher')),
   class_id uuid references public.classes(id) on delete cascade,
   student_id uuid references public.students(id) on delete cascade,
   parent_id uuid references public.parents(id) on delete cascade,
+  teacher_id uuid references public.teachers(id) on delete cascade,
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
   check (
-    (target_type = 'all' and class_id is null and student_id is null and parent_id is null)
-    or (target_type = 'class' and class_id is not null and student_id is null and parent_id is null)
-    or (target_type = 'student' and student_id is not null and parent_id is null)
-    or (target_type = 'parent' and parent_id is not null)
+    (target_type = 'all' and class_id is null and student_id is null and parent_id is null and teacher_id is null)
+    or (target_type = 'class' and class_id is not null and student_id is null and parent_id is null and teacher_id is null)
+    or (target_type = 'student' and student_id is not null and parent_id is null and teacher_id is null)
+    or (target_type = 'parent' and parent_id is not null and student_id is null and teacher_id is null)
+    or (target_type = 'all_parents' and class_id is null and student_id is null and parent_id is null and teacher_id is null)
+    or (target_type = 'class_parents' and class_id is not null and student_id is null and parent_id is null and teacher_id is null)
+    or (target_type = 'all_teachers' and class_id is null and student_id is null and parent_id is null and teacher_id is null)
+    or (target_type = 'teacher' and teacher_id is not null and class_id is null and student_id is null and parent_id is null)
   )
 );
 
