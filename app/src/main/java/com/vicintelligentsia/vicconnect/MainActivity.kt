@@ -1,6 +1,11 @@
 package com.vicintelligentsia.vicconnect
 
+import android.Manifest
+import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -63,8 +68,9 @@ private data class Student(val id: String, val name: String, val className: Stri
 private data class ClassStat(val classId: String, val className: String, val effectif: Int)
 private data class StudentRanking(val id: String, val name: String, val generalAverage: Double?)
 private data class TeacherConversation(val parentId: String, val parentName: String, val studentId: String, val studentName: String, val className: String, val lastMessage: String, val lastSenderRole: String, val lastMessageAt: String)
+private data class MobileNotification(val id: String, val title: String, val body: String, val createdAt: String)
 
-private class VicApi {
+class VicApi {
     private val base = BuildConfig.SUPABASE_URL.trimEnd('/')
     private val key = BuildConfig.SUPABASE_ANON_KEY
 
@@ -123,6 +129,10 @@ private class VicApi {
         (0 until a.length()).map { i -> a.getJSONObject(i).let { Announcement(it.getString("announcement_id"), it.optString("title"), it.optString("body"), it.optString("importance"), dateLabel(it.optString("created_at")), it.optBoolean("acknowledged")) } }
     }
 
+    fun teacherAnnouncements(code: String): List<Announcement> = arr(post("teacher_announcements", JSONObject().put("p_code", code))).let { a ->
+        (0 until a.length()).map { i -> a.getJSONObject(i).let { Announcement(it.getString("announcement_id"), it.optString("title"), it.optString("body"), it.optString("importance"), dateLabel(it.optString("created_at")), false) } }
+    }
+
     fun acknowledge(code: String, id: String, childId: String) {
         post("acknowledge_announcement", JSONObject().put("p_code", code).put("p_announcement_id", id).put("p_student_id", childId))
     }
@@ -165,6 +175,10 @@ private class VicApi {
         (0 until a.length()).map { i -> a.getJSONObject(i).let { TeacherClass(it.getString("class_id"), it.getString("class_name"), it.getString("subject_id"), it.getString("subject_name"), it.getString("assignment_id"), it.optBoolean("is_homeroom")) } }
     }
 
+    fun mobileNotifications(code: String, role: String, since: String): List<MobileNotification> = arr(post("mobile_notifications", JSONObject().put("p_code", code).put("p_role", role).put("p_since", since))).let { a ->
+        (0 until a.length()).map { i -> a.getJSONObject(i).let { MobileNotification(it.getString("notification_id"), it.optString("title"), it.optString("body"), it.getString("created_at")) } }
+    }
+
     fun teacherStudents(code: String, classId: String): List<Student> = arr(post("teacher_students", JSONObject().put("p_code", code).put("p_class_id", classId))).let { a ->
         (0 until a.length()).map { i -> a.getJSONObject(i).let { Student(it.getString("student_id"), it.getString("student_name"), it.getString("class_name")) } }
             .sortedBy { it.name.lowercase(Locale.FRANCE) }
@@ -181,21 +195,49 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences("vic_connect_local", Context.MODE_PRIVATE)
-        setContent { VicConnectApp(prefs) }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7001)
+        }
+        setContent { VicConnectApp(prefs, this) }
     }
 }
 
 @Composable
-private fun VicConnectApp(prefs: android.content.SharedPreferences) {
+private fun VicConnectApp(prefs: android.content.SharedPreferences, activity: MainActivity) {
     MaterialTheme(colorScheme = lightColorScheme(primary = DarkGreen, secondary = YellowGreen, background = Color.White, surface = Color.White, onPrimary = Color.White, onSecondary = Color.Black)) {
         Surface(Modifier.fillMaxSize(), color = Color.White) {
             var code by remember { mutableStateOf(prefs.getString("last_access_code", "") ?: "") }
-            var role by remember { mutableStateOf<String?>(null) }
-            var profileName by remember { mutableStateOf("") }
+            var role by remember { mutableStateOf<String?>(prefs.getString("last_role", null)) }
+            var profileName by remember { mutableStateOf(prefs.getString("last_profile_name", "") ?: "") }
             var error by remember { mutableStateOf("") }
             var loading by remember { mutableStateOf(false) }
             val api = remember { VicApi() }
             val scope = rememberCoroutineScope()
+
+            LaunchedEffect(Unit) {
+                val savedCode = prefs.getString("last_access_code", "") ?: ""
+                if (savedCode.isNotBlank() && (role == null || profileName.isBlank())) {
+                    loading = true
+                    runCatching {
+                        withContext(Dispatchers.IO) { api.login(savedCode) }
+                    }.onSuccess { r ->
+                        if (r.optBoolean("success", false)) {
+                            role = r.optString("role")
+                            profileName = r.optString("full_name")
+                            prefs.edit().putString("last_role", role).putString("last_profile_name", profileName).apply()
+                            startVicNotificationService(activity)
+                        } else {
+                            prefs.edit().clear().apply()
+                            code = ""; role = null; profileName = ""
+                        }
+                    }.onFailure {
+                        // En cas de réseau indisponible, on garde la session locale et réessaiera au prochain lancement.
+                    }
+                    loading = false
+                } else if (role != null && code.isNotBlank()) {
+                    startVicNotificationService(activity)
+                }
+            }
 
             if (role == null) {
                 LoginScreen(code, { code = it }, error, loading) {
@@ -207,10 +249,16 @@ private fun VicConnectApp(prefs: android.content.SharedPreferences) {
                                 error = r.optString("message", "Code incorrect.")
                             } else {
                                 val normalized = code.trim().uppercase()
-                                prefs.edit().putString("last_access_code", normalized).apply()
                                 code = normalized
                                 role = r.optString("role")
                                 profileName = r.optString("full_name")
+                                prefs.edit()
+                                    .putString("last_access_code", normalized)
+                                    .putString("last_role", role)
+                                    .putString("last_profile_name", profileName)
+                                    .putString("notification_cursor", java.time.Instant.now().toString())
+                                    .apply()
+                                startVicNotificationService(activity)
                             }
                         } catch (e: Exception) {
                             error = "Connexion impossible : ${e.message?.take(140) ?: "erreur réseau ou serveur"}"
@@ -218,9 +266,17 @@ private fun VicConnectApp(prefs: android.content.SharedPreferences) {
                     }
                 }
             } else if (role == "parent") {
-                ParentHome(api, code, profileName) { role = null }
+                ParentHome(api, code, profileName) {
+                    stopVicNotificationService(activity)
+                    prefs.edit().clear().apply()
+                    code = ""; role = null; profileName = ""
+                }
             } else {
-                TeacherHome(api, code, profileName) { role = null }
+                TeacherHome(api, code, profileName) {
+                    stopVicNotificationService(activity)
+                    prefs.edit().clear().apply()
+                    code = ""; role = null; profileName = ""
+                }
             }
         }
     }
@@ -418,6 +474,40 @@ private fun Conversation(api: VicApi, code: String, child: Child, teacher: Teach
 }
 
 @Composable
+private fun TeacherDirectionMessagesScreen(api: VicApi, code: String, back: () -> Unit) {
+    var items by remember { mutableStateOf<List<Announcement>>(emptyList()) }
+    val scope = rememberCoroutineScope()
+    BackHandler { back() }
+    fun refresh() { scope.launch { runCatching { items = withContext(Dispatchers.IO) { api.teacherAnnouncements(code) } } } }
+    LaunchedEffect(Unit) { refresh() }
+    Column(Modifier.fillMaxSize()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = back) { Icon(Icons.Default.ArrowBack, "Retour") }
+            Text("Messages de la Direction", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = DarkGreen)
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("Messages envoyés par la Direction à tous les enseignants.", color = Color.Gray, fontSize = 12.sp)
+        Spacer(Modifier.height(12.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(items) { n ->
+                val c = when (n.importance) { "rouge" -> Red; "orange" -> Orange; else -> YellowGreen }
+                Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(n.title, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
+                        Text(n.createdAt, color = Color.Gray, fontSize = 11.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Text(n.body)
+                        Spacer(Modifier.height(8.dp))
+                        Box(Modifier.fillMaxWidth().height(4.dp).background(c, RoundedCornerShape(4.dp)))
+                    }
+                }
+            }
+        }
+        if (items.isEmpty()) Text("Aucun message de la Direction.", color = Color.Gray)
+    }
+}
+
+@Composable
 private fun TeacherHome(api: VicApi, code: String, teacherName: String, logout: () -> Unit) {
     var assignments by remember { mutableStateOf<List<TeacherClass>>(emptyList()) }
     var selectedAssignment by remember { mutableStateOf<TeacherClass?>(null) }
@@ -469,6 +559,7 @@ private fun TeacherHome(api: VicApi, code: String, teacherName: String, logout: 
                     step = "messages"
                     scope.launch { conversations = withContext(Dispatchers.IO) { api.teacherConversations(code) } }
                 }
+                ParentAction("Messages de la Direction", Icons.Default.Campaign) { step = "direction" }
             }
             "assignments" -> {
                 TextButton(onClick = { step = "home" }) { Text("← Tableau de bord") }
@@ -541,6 +632,7 @@ private fun TeacherHome(api: VicApi, code: String, teacherName: String, logout: 
             "conversation" -> selectedConversation?.let { c ->
                 TeacherConversationScreen(api, code, c, { selectedConversation = null; step = "messages" })
             }
+            "direction" -> TeacherDirectionMessagesScreen(api, code) { step = "home" }
         }
     }
 }
