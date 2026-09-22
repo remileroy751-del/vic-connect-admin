@@ -20,7 +20,6 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
-private data class MobileNotification(val id: String, val title: String, val body: String, val createdAt: String)
 
 class VicNotificationService : Service() {
     private val job = SupervisorJob()

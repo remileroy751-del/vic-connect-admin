@@ -46,29 +46,29 @@ private val SoftGreen = Color(0xFFEAF2D1)
 private val Orange = Color(0xFFE78A21)
 private val Red = Color(0xFFD63C3C)
 
-private data class Child(val id: String, val name: String, val className: String)
-private data class Teacher(val id: String, val name: String, val subject: String, val homeroom: Boolean)
-private data class NoteRow(
+data class Child(val id: String, val name: String, val className: String)
+data class Teacher(val id: String, val name: String, val subject: String, val homeroom: Boolean)
+data class NoteRow(
     val subject: String,
     val homework: List<Pair<String, Double>>,
     val classAverage: Double?,
     val composition: Double?,
     val subjectAverage: Double?
 )
-private data class Announcement(
+data class Announcement(
     val id: String, val title: String, val body: String,
     val importance: String, val createdAt: String, val acknowledged: Boolean
 )
-private data class ChatMessage(val id: String, val senderRole: String, val body: String, val createdAt: String)
-private data class TeacherClass(
+data class ChatMessage(val id: String, val senderRole: String, val body: String, val createdAt: String)
+data class TeacherClass(
     val classId: String, val className: String, val subjectId: String,
     val subjectName: String, val assignmentId: String, val homeroom: Boolean
 )
-private data class Student(val id: String, val name: String, val className: String)
-private data class ClassStat(val classId: String, val className: String, val effectif: Int)
-private data class StudentRanking(val id: String, val name: String, val generalAverage: Double?)
-private data class TeacherConversation(val parentId: String, val parentName: String, val studentId: String, val studentName: String, val className: String, val lastMessage: String, val lastSenderRole: String, val lastMessageAt: String)
-private data class MobileNotification(val id: String, val title: String, val body: String, val createdAt: String)
+data class Student(val id: String, val name: String, val className: String)
+data class ClassStat(val classId: String, val className: String, val effectif: Int)
+data class StudentRanking(val id: String, val name: String, val generalAverage: Double?)
+data class TeacherConversation(val parentId: String, val parentName: String, val studentId: String, val studentName: String, val className: String, val lastMessage: String, val lastSenderRole: String, val lastMessageAt: String)
+data class MobileNotification(val id: String, val title: String, val body: String, val createdAt: String)
 
 class VicApi {
     private val base = BuildConfig.SUPABASE_URL.trimEnd('/')
