@@ -222,11 +222,6 @@ class MainActivity : ComponentActivity() {
     override fun onStart() { super.onStart(); AppForeground.active = true }
     override fun onResume() { super.onResume(); AppForeground.resumeTick = AppForeground.resumeTick + 1 }
     override fun onStop() { AppForeground.active = false; super.onStop() }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        AppForeground.resumeTick = AppForeground.resumeTick + 1
-    }
 }
 
 /** Relance périodique d'une actualisation tant que l'application est visible (messages reçus en direct dans l'écran ouvert). */
