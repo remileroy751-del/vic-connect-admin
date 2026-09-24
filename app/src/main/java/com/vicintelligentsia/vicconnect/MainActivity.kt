@@ -5,8 +5,11 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -16,6 +19,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -29,7 +33,10 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationManagerCompat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -179,6 +186,11 @@ class VicApi {
         (0 until a.length()).map { i -> a.getJSONObject(i).let { MobileNotification(it.getString("notification_id"), it.optString("title"), it.optString("body"), it.getString("created_at")) } }
     }
 
+    /** Heure du serveur (UTC) : sert de point de départ fiable aux notifications, même si l'horloge du téléphone est fausse. */
+    fun serverTimeOrNull(): String? = runCatching {
+        post("mobile_server_time", JSONObject()).trim().trim('"').takeIf { it.length >= 19 }
+    }.getOrNull()
+
     fun teacherStudents(code: String, classId: String): List<Student> = arr(post("teacher_students", JSONObject().put("p_code", code).put("p_class_id", classId))).let { a ->
         (0 until a.length()).map { i -> a.getJSONObject(i).let { Student(it.getString("student_id"), it.getString("student_name"), it.getString("class_name")) } }
             .sortedBy { it.name.lowercase(Locale.FRANCE) }
@@ -191,6 +203,12 @@ class VicApi {
 
 private fun JSONObject.takeDouble(key: String): Double? = if (!has(key) || isNull(key)) null else optDouble(key).takeIf { !it.isNaN() }
 
+/** État partagé : l'écran est-il visible ? Permet d'actualiser les messages seulement quand l'app est au premier plan. */
+private object AppForeground {
+    var active by mutableStateOf(false)
+    var resumeTick by mutableStateOf(0)
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -199,6 +217,75 @@ class MainActivity : ComponentActivity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7001)
         }
         setContent { VicConnectApp(prefs, this) }
+    }
+
+    override fun onStart() { super.onStart(); AppForeground.active = true }
+    override fun onResume() { super.onResume(); AppForeground.resumeTick = AppForeground.resumeTick + 1 }
+    override fun onStop() { AppForeground.active = false; super.onStop() }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        AppForeground.resumeTick = AppForeground.resumeTick + 1
+    }
+}
+
+/** Relance périodique d'une actualisation tant que l'application est visible (messages reçus en direct dans l'écran ouvert). */
+@Composable
+private fun PollWhileVisible(intervalMs: Long, block: suspend () -> Unit) {
+    val current by rememberUpdatedState(block)
+    val active = AppForeground.active
+    LaunchedEffect(active) {
+        if (active) {
+            while (true) {
+                delay(intervalMs)
+                try { current() } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+            }
+        }
+    }
+}
+
+private fun isIgnoringBatteryOptimizations(context: Context): Boolean = runCatching {
+    (context.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(context.packageName)
+}.getOrDefault(true)
+
+private fun requestIgnoreBatteryOptimizations(context: Context) {
+    runCatching {
+        context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply { data = Uri.parse("package:${context.packageName}") })
+    }.onFailure {
+        runCatching { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+    }
+}
+
+private fun openNotificationSettings(context: Context) {
+    runCatching {
+        context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
+    }
+}
+
+/** Guide l'utilisateur pour que les notifications s'affichent en haut de l'écran et arrivent même application fermée. */
+@Composable
+private fun BackgroundSetupDialogs(activity: MainActivity, prefs: android.content.SharedPreferences) {
+    val tick = AppForeground.resumeTick
+    var notifDismissed by remember { mutableStateOf(false) }
+    var batteryDone by remember { mutableStateOf(prefs.getBoolean("battery_prompt_done", false)) }
+    val notificationsOn = remember(tick) { NotificationManagerCompat.from(activity).areNotificationsEnabled() }
+    val batteryOk = remember(tick) { isIgnoringBatteryOptimizations(activity) }
+    if (!notificationsOn && !notifDismissed) {
+        AlertDialog(
+            onDismissRequest = { notifDismissed = true },
+            title = { Text("Activer les notifications") },
+            text = { Text("Pour être averti(e) dès qu'un message arrive, en haut de l'écran de votre téléphone, autorisez les notifications de VIC-CONNECT.") },
+            confirmButton = { TextButton(onClick = { notifDismissed = true; openNotificationSettings(activity) }) { Text("Ouvrir les paramètres") } },
+            dismissButton = { TextButton(onClick = { notifDismissed = true }) { Text("Plus tard") } }
+        )
+    } else if (notificationsOn && !batteryOk && !batteryDone) {
+        AlertDialog(
+            onDismissRequest = { batteryDone = true; prefs.edit().putBoolean("battery_prompt_done", true).apply() },
+            title = { Text("Rester connecté en arrière-plan") },
+            text = { Text("Pour recevoir les messages même quand VIC-CONNECT est fermée ou que le téléphone est en veille, autorisez l'application à fonctionner en arrière-plan sans restriction de batterie.") },
+            confirmButton = { TextButton(onClick = { batteryDone = true; prefs.edit().putBoolean("battery_prompt_done", true).apply(); requestIgnoreBatteryOptimizations(activity) }) { Text("Autoriser") } },
+            dismissButton = { TextButton(onClick = { batteryDone = true; prefs.edit().putBoolean("battery_prompt_done", true).apply() }) { Text("Plus tard") } }
+        )
     }
 }
 
@@ -236,9 +323,21 @@ private fun VicConnectApp(prefs: android.content.SharedPreferences, activity: Ma
                     loading = false
                 } else if (role != null && code.isNotBlank()) {
                     startVicNotificationService(activity)
+                    // Vérification silencieuse : la session n'est effacée que si la Direction a réellement supprimé/changé le code.
+                    runCatching { withContext(Dispatchers.IO) { api.login(code) } }.onSuccess { r ->
+                        if (r.has("success") && !r.optBoolean("success", true)) {
+                            stopVicNotificationService(activity)
+                            prefs.edit().clear().apply()
+                            code = ""; role = null; profileName = ""
+                        } else if (r.optString("full_name").isNotBlank() && r.optString("full_name") != profileName) {
+                            profileName = r.optString("full_name")
+                            prefs.edit().putString("last_profile_name", profileName).apply()
+                        }
+                    }
                 }
             }
 
+            if (role != null) BackgroundSetupDialogs(activity, prefs)
             if (role == null) {
                 LoginScreen(code, { code = it }, error, loading) {
                     loading = true; error = ""
@@ -249,6 +348,7 @@ private fun VicConnectApp(prefs: android.content.SharedPreferences, activity: Ma
                                 error = r.optString("message", "Code incorrect.")
                             } else {
                                 val normalized = code.trim().uppercase()
+                                val cursor = withContext(Dispatchers.IO) { api.serverTimeOrNull() } ?: java.time.Instant.now().minusSeconds(90).toString()
                                 code = normalized
                                 role = r.optString("role")
                                 profileName = r.optString("full_name")
@@ -256,7 +356,8 @@ private fun VicConnectApp(prefs: android.content.SharedPreferences, activity: Ma
                                     .putString("last_access_code", normalized)
                                     .putString("last_role", role)
                                     .putString("last_profile_name", profileName)
-                                    .putString("notification_cursor", java.time.Instant.now().toString())
+                                    .putString("notification_cursor", cursor)
+                                    .putString("notified_ids", "")
                                     .apply()
                                 startVicNotificationService(activity)
                             }
@@ -266,13 +367,13 @@ private fun VicConnectApp(prefs: android.content.SharedPreferences, activity: Ma
                     }
                 }
             } else if (role == "parent") {
-                ParentHome(api, code, profileName) {
+                ParentHome(api, code, profileName, onExit = { activity.moveTaskToBack(true) }) {
                     stopVicNotificationService(activity)
                     prefs.edit().clear().apply()
                     code = ""; role = null; profileName = ""
                 }
             } else {
-                TeacherHome(api, code, profileName) {
+                TeacherHome(api, code, profileName, onExit = { activity.moveTaskToBack(true) }) {
                     stopVicNotificationService(activity)
                     prefs.edit().clear().apply()
                     code = ""; role = null; profileName = ""
@@ -350,11 +451,11 @@ private fun Header(title: String, subtitle: String, logout: () -> Unit) {
 }
 
 @Composable
-private fun ParentHome(api: VicApi, code: String, parentName: String, logout: () -> Unit) {
+private fun ParentHome(api: VicApi, code: String, parentName: String, onExit: () -> Unit, logout: () -> Unit) {
     var children by remember { mutableStateOf<List<Child>>(emptyList()) }
     var selected by remember { mutableStateOf<Child?>(null) }
     var error by remember { mutableStateOf("") }
-    BackHandler(enabled = selected != null) { selected = null }
+    BackHandler { if (selected != null) selected = null else onExit() }
     LaunchedEffect(Unit) { try { children = withContext(Dispatchers.IO) { api.parentChildren(code) } } catch (_: Exception) { error = "Impossible de charger les enfants." } }
     if (selected == null) {
         Column(Modifier.fillMaxSize().padding(20.dp)) {
@@ -430,6 +531,7 @@ private fun NewsScreen(api: VicApi, code: String, child: Child, back: () -> Unit
     var items by remember { mutableStateOf<List<Announcement>>(emptyList()) }; val scope = rememberCoroutineScope(); BackHandler { back() }
     fun refresh() { scope.launch { runCatching { items = withContext(Dispatchers.IO) { api.announcements(code, child.id) } } } }
     LaunchedEffect(Unit) { refresh() }
+    PollWhileVisible(20_000L) { items = withContext(Dispatchers.IO) { api.announcements(code, child.id) } }
     Column(Modifier.fillMaxSize()) { Text("Message de la Direction", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = DarkGreen); Spacer(Modifier.height(12.dp)); LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) { items(items) { n -> val c = when (n.importance) { "urgent", "rouge" -> Red; else -> YellowGreen }; Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Column(Modifier.padding(16.dp)) { Text(n.title, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp); Text(n.createdAt, color = Color.Gray, fontSize = 11.sp); Spacer(Modifier.height(6.dp)); Text(n.body); Spacer(Modifier.height(10.dp)); Button(onClick = { if (!n.acknowledged) scope.launch { withContext(Dispatchers.IO) { api.acknowledge(code, n.id, child.id) }; refresh() } }, enabled = !n.acknowledged, colors = ButtonDefaults.buttonColors(containerColor = c)) { Text(if (n.acknowledged) "Bien reçu ✓" else "Bien reçu", color = if (n.importance == "pas_urgent" || n.importance == "vert" || n.importance == "orange") Color.Black else Color.White) } } } } } }
 }
 
@@ -451,6 +553,9 @@ private fun Conversation(api: VicApi, code: String, child: Child, teacher: Teach
     BackHandler { back() }
     fun refresh() { scope.launch { runCatching { messages = withContext(Dispatchers.IO) { api.messages(code, child.id, teacher.id) } }.onFailure { error = it.message ?: "Erreur" } } }
     LaunchedEffect(Unit) { refresh() }
+    PollWhileVisible(8_000L) { messages = withContext(Dispatchers.IO) { api.messages(code, child.id, teacher.id) } }
+    val listState = rememberLazyListState()
+    LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex) }
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = back) { Icon(Icons.Default.ArrowBack, "Retour") }
@@ -458,7 +563,7 @@ private fun Conversation(api: VicApi, code: String, child: Child, teacher: Teach
         }
         Text("5 messages maximum par jour et par compte. Réinitialisation à 00h GMT.", fontSize = 11.sp, color = Color.Gray)
         if (error.isNotBlank()) Text(error, color = Red, fontSize = 12.sp)
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, contentPadding = PaddingValues(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(messages) { m -> Row(Modifier.fillMaxWidth(), horizontalArrangement = if (m.senderRole == "parent") Arrangement.End else Arrangement.Start) { Card(shape = RoundedCornerShape(16.dp)) { Column(Modifier.padding(12.dp)) { Text(m.body); Text(m.createdAt, fontSize = 9.sp, color = Color.Gray) } } } }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -480,6 +585,7 @@ private fun TeacherDirectionMessagesScreen(api: VicApi, code: String, back: () -
     BackHandler { back() }
     fun refresh() { scope.launch { runCatching { items = withContext(Dispatchers.IO) { api.teacherAnnouncements(code) } } } }
     LaunchedEffect(Unit) { refresh() }
+    PollWhileVisible(20_000L) { items = withContext(Dispatchers.IO) { api.teacherAnnouncements(code) } }
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = back) { Icon(Icons.Default.ArrowBack, "Retour") }
@@ -508,7 +614,7 @@ private fun TeacherDirectionMessagesScreen(api: VicApi, code: String, back: () -
 }
 
 @Composable
-private fun TeacherHome(api: VicApi, code: String, teacherName: String, logout: () -> Unit) {
+private fun TeacherHome(api: VicApi, code: String, teacherName: String, onExit: () -> Unit, logout: () -> Unit) {
     var assignments by remember { mutableStateOf<List<TeacherClass>>(emptyList()) }
     var selectedAssignment by remember { mutableStateOf<TeacherClass?>(null) }
     var term by remember { mutableStateOf("1er trimestre") }
@@ -529,7 +635,7 @@ private fun TeacherHome(api: VicApi, code: String, teacherName: String, logout: 
 
     BackHandler(enabled = true) {
         when (step) {
-            "home" -> logout()
+            "home" -> onExit()
             "assignments" -> step = "home"
             "noteTypes" -> { selectedAssignment = null; step = "assignments" }
             "students" -> { selectedStudent = null; step = "noteTypes" }
@@ -538,10 +644,12 @@ private fun TeacherHome(api: VicApi, code: String, teacherName: String, logout: 
             "ranking" -> { selectedStatClass = null; rankings = emptyList(); step = "statistics" }
             "messages" -> { selectedConversation = null; step = "home" }
             "conversation" -> { selectedConversation = null; step = "messages" }
+            "direction" -> step = "home"
         }
     }
 
     LaunchedEffect(Unit) { runCatching { assignments = withContext(Dispatchers.IO) { api.teacherClasses(code) } } }
+    PollWhileVisible(15_000L) { if (step == "messages") conversations = withContext(Dispatchers.IO) { api.teacherConversations(code) } }
     val visibleStudents = students.filter { it.name.contains(search.trim(), ignoreCase = true) }
 
     Column(Modifier.fillMaxSize().padding(20.dp)) {
@@ -646,6 +754,9 @@ private fun TeacherConversationScreen(api: VicApi, code: String, conversation: T
     BackHandler { back() }
     fun refresh() { scope.launch { runCatching { messages = withContext(Dispatchers.IO) { api.teacherMessages(code, conversation.studentId, conversation.parentId) } }.onFailure { error = it.message ?: "Erreur" } } }
     LaunchedEffect(Unit) { refresh() }
+    PollWhileVisible(8_000L) { messages = withContext(Dispatchers.IO) { api.teacherMessages(code, conversation.studentId, conversation.parentId) } }
+    val listState = rememberLazyListState()
+    LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex) }
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = back) { Icon(Icons.Default.ArrowBack, "Retour") }
@@ -653,7 +764,7 @@ private fun TeacherConversationScreen(api: VicApi, code: String, conversation: T
         }
         Text("5 messages maximum par jour et par compte. Réinitialisation à 00h GMT.", fontSize = 11.sp, color = Color.Gray)
         if (error.isNotBlank()) Text(error, color = Red, fontSize = 12.sp)
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { items(messages) { m -> Row(Modifier.fillMaxWidth(), horizontalArrangement = if (m.senderRole == "teacher") Arrangement.End else Arrangement.Start) { Card(shape = RoundedCornerShape(16.dp)) { Column(Modifier.padding(12.dp)) { Text(m.body); Text(m.createdAt, fontSize = 9.sp, color = Color.Gray) } } } } }
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, contentPadding = PaddingValues(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { items(messages) { m -> Row(Modifier.fillMaxWidth(), horizontalArrangement = if (m.senderRole == "teacher") Arrangement.End else Arrangement.Start) { Card(shape = RoundedCornerShape(16.dp)) { Column(Modifier.padding(12.dp)) { Text(m.body); Text(m.createdAt, fontSize = 9.sp, color = Color.Gray) } } } } }
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(text, { text = it }, Modifier.weight(1f), placeholder = { Text("Votre message...") }, maxLines = 4)
             IconButton(onClick = { if (text.isNotBlank()) { val sent = text.trim(); text = ""; error = ""; scope.launch { runCatching { withContext(Dispatchers.IO) { api.sendTeacherMessage(code, conversation.studentId, conversation.parentId, sent) }; refresh() }.onFailure { error = it.message ?: "Envoi impossible." } } } }) { Icon(Icons.Default.Send, "Envoyer", tint = DarkGreen) }

@@ -24,7 +24,7 @@ La clé Publishable Supabase est prévue pour être utilisée côté navigateur.
 - Classes et matières
 - Affectations enseignant/classe/matière
 - Notes
-- Communiqués vert/orange/rouge
+- Envoyer un message (À tous les parents / Aux parents d'une classe / À tous les enseignants / À un enseignant — Urgent ou Pas urgent)
 - Accusés de réception
 - Messagerie interne
 - Administration Super Admin

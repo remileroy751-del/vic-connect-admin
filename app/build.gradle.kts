@@ -17,12 +17,23 @@ android {
         jvmTarget = "17"
     }
 
+    // Clé de signature fixe : chaque APK compilé par GitHub Actions peut ainsi se mettre à jour par-dessus
+    // la version déjà installée (sans désinstaller ni perdre la session parent/enseignant).
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.vicintelligentsia.vicconnect"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 8
+        versionName = "8.0"
 
         val supabaseUrl = (project.findProperty("SUPABASE_URL") as String?) ?: "https://dcxfshorvdaypqyugeil.supabase.co"
         val supabaseKey = (project.findProperty("SUPABASE_ANON_KEY") as String?) ?: "sb_publishable_YsEsTvgdcnLBFzfxsOm0eg_Nmvt5lYY"

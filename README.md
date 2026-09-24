@@ -36,3 +36,6 @@ Après déploiement de cette version, exécuter **le contenu complet de `supabas
 ## Mise à jour V5 — Statistiques et messagerie
 Le fichier `supabase/migration-v5-messagerie-statistiques.sql` ajoute les statistiques enseignant, la boîte de réception enseignant et le quota de messagerie de 5 messages par compte et par jour civil GMT.
 Exécuter cette migration dans Supabase avant de tester les nouvelles fonctions.
+
+## Mise à jour V8 — Notifications et session
+Voir `README-V8-MISES-A-JOUR.md`. Exécuter `supabase/migration-v8-notifications-fiables.sql` dans Supabase > SQL Editor (après V6 et V7).
